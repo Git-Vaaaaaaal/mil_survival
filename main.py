@@ -36,6 +36,7 @@ label_csv_name = "csv/multi_label_patient_id.csv"
 
 results_dir   = './results'                  # dossier de sauvegarde des résultats
 which_splits  = '5foldcv'                    # sous-dossier dans ./splits/
+global_summary_path = os.path.join(results_dir, 'summary_all.csv')  # agrège summary_latest.csv de tous les runs
 
 # --- Reproductibilité ---------------------------------------------------------
 seed = 42
@@ -201,6 +202,18 @@ def main(args, dataset):
         results_latest_df = pd.DataFrame({'folds': folds, 'val_cindex': latest_val_cindex})
 
     results_latest_df.to_csv(os.path.join(args.results_dir, 'summary_latest.csv'))
+    return results_latest_df
+
+
+def append_to_global_summary(results_df, encoder, marker, label, args):
+    tagged_df = results_df.copy()
+    tagged_df.insert(0, 'encoder', encoder)
+    tagged_df.insert(1, 'marker', marker)
+    tagged_df.insert(2, 'label', label)
+    tagged_df.insert(3, 'exp_code', args.exp_code)
+
+    write_header = not os.path.isfile(global_summary_path)
+    tagged_df.to_csv(global_summary_path, mode='a', header=write_header, index=False)
 
 
 def run_experiment(encoder, marker, label):
@@ -246,6 +259,8 @@ def run_experiment(encoder, marker, label):
 
     if ('summary_latest.csv' in os.listdir(args.results_dir)) and (not args.overwrite):
         print("Exp Code <%s> already exists! Skipping." % args.exp_code)
+        results_latest_df = pd.read_csv(os.path.join(args.results_dir, 'summary_latest.csv'), index_col=0)
+        append_to_global_summary(results_latest_df, encoder, marker, label, args)
         return
 
     args.split_dir = os.path.join('./splits', args.which_splits, args.split_dir)
@@ -260,7 +275,8 @@ def run_experiment(encoder, marker, label):
     for key, val in settings.items():
         print("{}:  {}".format(key, val))
 
-    main(args, dataset)
+    results_latest_df = main(args, dataset)
+    append_to_global_summary(results_latest_df, encoder, marker, label, args)
 
 
 for label in label_list:

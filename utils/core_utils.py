@@ -5,6 +5,7 @@ import pickle
 
 from lifelines.utils import concordance_index
 import numpy as np
+import pandas as pd
 from sksurv.metrics import concordance_index_censored
 
 import torch
@@ -178,14 +179,32 @@ def train(datasets: tuple, cur: int, args: Namespace):
     monitor_cindex = Monitor_CIndex()
     print('Done!')
 
+    loss_history = {
+        'epoch': [], 'train_loss_surv': [], 'train_loss': [], 'train_c_index': [],
+        'val_loss_surv': [], 'val_loss': [], 'val_c_index': [],
+    }
+
     for epoch in range(args.max_epochs):
         if args.task_type == 'survival':
             if args.mode == 'cluster':
-                train_loop_survival_cluster(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc, VAE)
-                stop = validate_survival_cluster(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir, VAE)
+                train_loss_surv, train_loss, train_c_index = train_loop_survival_cluster(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc, VAE)
+                stop, val_loss_surv, val_loss, val_c_index = validate_survival_cluster(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir, VAE)
             else:
-                train_loop_survival(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc)
-                stop = validate_survival(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir)
+                train_loss_surv, train_loss, train_c_index = train_loop_survival(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc)
+                stop, val_loss_surv, val_loss, val_c_index = validate_survival(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir)
+
+        loss_history['epoch'].append(epoch)
+        loss_history['train_loss_surv'].append(train_loss_surv)
+        loss_history['train_loss'].append(train_loss)
+        loss_history['train_c_index'].append(train_c_index)
+        loss_history['val_loss_surv'].append(val_loss_surv)
+        loss_history['val_loss'].append(val_loss)
+        loss_history['val_c_index'].append(val_c_index)
+
+        if stop:
+            break
+
+    pd.DataFrame(loss_history).to_csv(os.path.join(args.results_dir, 'loss_curve_{}.csv'.format(cur)), index=False)
 
     torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
     model.load_state_dict(torch.load(os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur))))
@@ -257,6 +276,8 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
         writer.add_scalar('train/loss', train_loss, epoch)
         writer.add_scalar('train/c_index', c_index, epoch)
 
+    return train_loss_surv, train_loss, c_index
+
 
 def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None, monitor_cindex=None, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., results_dir=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -310,9 +331,9 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
         
         if early_stopping.early_stop:
             print("Early stopping")
-            return True
+            return True, val_loss_surv, val_loss, c_index
 
-    return False
+    return False, val_loss_surv, val_loss, c_index
 
 
 def summary_survival(model, loader, n_classes):
@@ -410,6 +431,8 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
         writer.add_scalar('train/loss', train_loss, epoch)
         writer.add_scalar('train/c_index', c_index, epoch)
 
+    return train_loss_surv, train_loss, c_index
+
 
 def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stopping=None, monitor_cindex=None, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., results_dir=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -458,9 +481,9 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
         
         if early_stopping.early_stop:
             print("Early stopping")
-            return True
+            return True, val_loss_surv, val_loss, c_index
 
-    return False
+    return False, val_loss_surv, val_loss, c_index
 
 
 def summary_survival_cluster(model, loader, n_classes):
