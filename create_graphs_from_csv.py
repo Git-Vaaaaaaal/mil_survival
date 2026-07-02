@@ -43,7 +43,7 @@ def build_graph(csv_path: str, k: int) -> Data:
     return data
 
 
-def main(csv_dir, output_dir, k_neighbors=6, overwrite=False):
+def csv_to_graph(csv_dir, output_dir, k_neighbors=6, overwrite=False):
     os.makedirs(output_dir, exist_ok=True)
     csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
 
@@ -68,11 +68,14 @@ def main(csv_dir, output_dir, k_neighbors=6, overwrite=False):
 
     print("Done.")
 
+list_encoder = ["openmidnight", "musk", "virchow2", "gpfm", "hibou_l"]
+marker_list = ["BCL2", "BCL6", "CD10", "HE", "MUM1", "MYC"]
 
-if __name__ == "__main__":
-    csv_dir     = ""     # répertoire contenant les CSV (un par slide)
-    output_dir  = ""     # répertoire de sortie pour les .pt
-    k_neighbors = 6      # nombre de voisins spatiaux par patch
-    overwrite   = False  # True pour re-générer les fichiers existants
+for encoder in list_encoder:
+    for marker in marker_list:
+        csv_dir = os.path.join("data_224_reborn", encoder, marker, "patches")
+        output_dir = os.path.join("data_224_reborn", encoder, marker, "graphs")
+        k_neighbors = 6      # nombre de voisins spatiaux par patch
+        overwrite   = False  # True pour re-générer les fichiers existants
 
-    main(csv_dir, output_dir, k_neighbors, overwrite)
+        csv_to_graph(csv_dir, output_dir, k_neighbors, overwrite)

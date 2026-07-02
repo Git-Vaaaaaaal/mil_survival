@@ -25,14 +25,20 @@ from torch.utils.data import DataLoader, sampler
 # CONFIGURATION — modifier uniquement cette section
 # =============================================================================
 
+# --- Combinaisons à parcourir --------------------------------------------------
+list_encoder = ["openmidnight", "musk", "virchow2", "gpfm", "hibou_l"]
+marker_list  = ["BCL2", "BCL6", "CD10", "HE", "MUM1", "MYC"]
+label_list = ["PFS", "OS"]
+
 # --- Chemins ------------------------------------------------------------------
-data_root_dir = '/media/ssd1/pan-cancer/'   # racine des données features
+data_root      = 'data_224_reborn'    # racine des données, structure {data_root}/{encoder}/{marker}/graphs
+label_csv_name = "csv/multi_label_patient_id.csv"
+
 results_dir   = './results'                  # dossier de sauvegarde des résultats
-which_splits  = '5foldcv'                   # sous-dossier dans ./splits/
-split_dir     = 'tcga_blca_100'             # cohorte à utiliser
+which_splits  = '5foldcv'                    # sous-dossier dans ./splits/
 
 # --- Reproductibilité ---------------------------------------------------------
-seed = 1
+seed = 42
 
 # --- Cross-validation ---------------------------------------------------------
 k       = 5    # nombre total de folds
@@ -57,8 +63,8 @@ encoding_size  = 1024        # dimension des embeddings en entrée
 opt        = 'adam'  # 'adam' | 'sgd'
 batch_size = 1       # taille de batch (1 recommandé : graphes de tailles variables)
 gc         = 32      # gradient accumulation (simule batch_size * gc)
-max_epochs = 20      # nombre d'époques d'entraînement
-lr         = 2e-4    # taux d'apprentissage
+max_epochs = 80      # nombre d'époques d'entraînement
+lr         = 1e-4    # taux d'apprentissage
 
 # --- Fonction de perte survie -------------------------------------------------
 bag_loss        = 'nll_surv'  # 'ce_surv' | 'nll_surv' | 'cox_surv'
@@ -71,32 +77,33 @@ lambda_reg      = 1e-4        # force de la régularisation L1
 weighted_sample = True        # rééquilibrage par classe au sampling
 early_stopping  = False       # arrêt anticipé si la loss ne s'améliore plus
 
+
+ENCODER_CFG = {
+    "prism":   dict(in_shape=2560, tiles_subdir="features_virchow",   slide_subdir="slide_features_prism",  slide_csv="prism_encoder.csv"),
+    "titan":   dict(in_shape=768,  tiles_subdir="features_conch_v15", slide_subdir="slide_features_titan",  slide_csv="titan_encoder.csv"),
+    "feather": dict(in_shape=768,  tiles_subdir="features_conch_v15", slide_subdir="slide_features_feather", slide_csv="feather_encoder.csv"),
+    "gpfm": dict(in_shape=1024,  tiles_subdir="features_gpfm", slide_subdir="", slide_csv=""),
+    "musk": dict(in_shape=1024,  tiles_subdir="features_musk", slide_subdir="", slide_csv=""),
+    "openmidnight": dict(in_shape=1536,  tiles_subdir="features_openmidnight", slide_subdir="", slide_csv=""),
+    "hibou_l": dict(in_shape=1024,  tiles_subdir="features_hibou_l", slide_subdir="", slide_csv=""),
+    "virchow2": dict(in_shape=2560,  tiles_subdir="features_virchow2", slide_subdir="", slide_csv=""),
+}
+
 # =============================================================================
 # NE PAS MODIFIER EN DESSOUS
 # =============================================================================
 
-args = types.SimpleNamespace(
-    data_root_dir=data_root_dir,
-    results_dir=results_dir,
-    which_splits=which_splits,
-    split_dir=split_dir,
-    seed=seed,
-    k=k, k_start=k_start, k_end=k_end,
-    log_data=log_data, overwrite=overwrite, testing=testing,
-    model_type=model_type, mode=mode, num_gcn_layers=num_gcn_layers,
-    edge_agg=edge_agg, resample=resample, drop_out=drop_out,
-    encoding_size=encoding_size,
-    opt=opt, batch_size=batch_size, gc=gc, max_epochs=max_epochs, lr=lr,
-    bag_loss=bag_loss, alpha_surv=alpha_surv, bag_weight=bag_weight,
-    label_frac=label_frac, reg=reg, reg_type=reg_type, lambda_reg=lambda_reg,
-    weighted_sample=weighted_sample, early_stopping=early_stopping,
-)
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-args = get_custom_exp_code(args)
-args.task = '_'.join(args.split_dir.split('_')[:2]) + '_survival'
-print("Experiment Name:", args.exp_code)
+def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_time'
+    df = df[df['marker'] == marker].copy()
+    df['case_id'] = df['patient_id']
+    mask = df[element_time] > 5.0
+    df.loc[mask, "status"] = 0
+    df.loc[mask, element_time] = 5.0
+    df = df.rename(columns={"status": "censorship"})
+    df = df[['case_id', 'slide_id', 'censorship', element_time]]
+    return df
 
 
 def seed_torch(seed=7):
@@ -111,87 +118,52 @@ def seed_torch(seed=7):
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
 
-seed_torch(args.seed)
 
-settings = {
-    'num_splits':    args.k,
-    'k_start':       args.k_start,
-    'k_end':         args.k_end,
-    'task':          args.task,
-    'max_epochs':    args.max_epochs,
-    'results_dir':   args.results_dir,
-    'lr':            args.lr,
-    'experiment':    args.exp_code,
-    'reg':           args.reg,
-    'label_frac':    args.label_frac,
-    'bag_loss':      args.bag_loss,
-    'bag_weight':    args.bag_weight,
-    'seed':          args.seed,
-    'model_type':    args.model_type,
-    'weighted_sample': args.weighted_sample,
-    'gc':            args.gc,
-    'opt':           args.opt,
-}
-print('\nLoad Dataset')
+def build_args(encoder, marker, label):
+    args = types.SimpleNamespace(
+        data_root_dir=os.path.join(data_root, encoder, marker),
+        label_col = label,
+        results_dir=results_dir,
+        which_splits=which_splits,
+        split_dir=marker,
+        seed=seed,
+        k=k, k_start=k_start, k_end=k_end,
+        log_data=log_data, overwrite=overwrite, testing=testing,
+        model_type=model_type, mode=mode, num_gcn_layers=num_gcn_layers,
+        edge_agg=edge_agg, resample=resample, drop_out=drop_out,
+        encoding_size=ENCODER_CFG[encoder]['in_shape'],
+        opt=opt, batch_size=batch_size, gc=gc, max_epochs=max_epochs, lr=lr,
+        bag_loss=bag_loss, alpha_surv=alpha_surv, bag_weight=bag_weight,
+        label_frac=label_frac, reg=reg, reg_type=reg_type, lambda_reg=lambda_reg,
+        weighted_sample=weighted_sample, early_stopping=early_stopping,
+    )
+    args = get_custom_exp_code(args)
+    args.task = '%s_survival' % marker
+    return args
 
-if 'survival' in args.task:
+
+def load_dataset(args, marker):
+    print('\nLoad Dataset')
     args.n_classes = 4
-    study = '_'.join(args.task.split('_')[:2])
-    if study in ('tcga_kirc', 'tcga_kirp'):
-        combined_study = 'tcga_kidney'
-    elif study in ('tcga_luad', 'tcga_lusc'):
-        combined_study = 'tcga_lung'
-    else:
-        combined_study = study
-    study_dir = '%s_20x_features' % combined_study
     dataset = Generic_MIL_Survival_Dataset(
-        csv_path  = './dataset_csv/%s_all_clean.csv.zip' % combined_study,
+        csv_path  = cleaning_csv(pd.read_csv(label_csv_name), marker, args.label_col),
         mode      = args.mode,
-        data_dir  = os.path.join(args.data_root_dir, study_dir),
+        data_dir  = os.path.join(args.data_root_dir, 'graphs'),
         shuffle   = False,
         seed      = args.seed,
         print_info= True,
         patient_strat = False,
         n_bins    = 4,
-        label_col = 'survival_months',
+        label_col = args.label_col,
         ignore    = [],
     )
-else:
-    raise NotImplementedError
-
-if isinstance(dataset, Generic_MIL_Survival_Dataset):
+    if not isinstance(dataset, Generic_MIL_Survival_Dataset):
+        raise NotImplementedError
     args.task_type = 'survival'
-else:
-    raise NotImplementedError
-
-if not os.path.isdir(args.results_dir):
-    os.mkdir(args.results_dir)
-
-args.results_dir = os.path.join(
-    args.results_dir, args.which_splits, args.param_code,
-    str(args.exp_code) + '_s{}'.format(args.seed)
-)
-if not os.path.isdir(args.results_dir):
-    os.makedirs(args.results_dir)
-
-if ('summary_latest.csv' in os.listdir(args.results_dir)) and (not args.overwrite):
-    print("Exp Code <%s> already exists! Exiting script." % args.exp_code)
-    sys.exit()
-
-args.split_dir = os.path.join('./splits', args.which_splits, args.split_dir)
-print("split_dir", args.split_dir)
-assert os.path.isdir(args.split_dir)
-settings.update({'split_dir': args.split_dir})
-
-with open(args.results_dir + '/experiment_{}.txt'.format(args.exp_code), 'w') as f:
-    print(settings, file=f)
-
-print("################# Settings ###################")
-for key, val in settings.items():
-    print("{}:  {}".format(key, val))
+    return dataset
 
 
-def main(args):
+def main(args, dataset):
     if not os.path.isdir(args.results_dir):
         os.mkdir(args.results_dir)
 
@@ -231,9 +203,68 @@ def main(args):
     results_latest_df.to_csv(os.path.join(args.results_dir, 'summary_latest.csv'))
 
 
-if __name__ == "__main__":
-    t0 = timer()
-    results = main(args)
-    print("finished!")
-    print("end script")
-    print('Script Time: %f seconds' % (timer() - t0))
+def run_experiment(encoder, marker, label):
+    print("\n" + "=" * 80)
+    print("Encoder: %s | Marker: %s | Label: %s" % (encoder, marker, label))
+    print("=" * 80)
+
+    args = build_args(encoder, marker, label)
+    print("Experiment Name:", args.exp_code)
+    seed_torch(args.seed)
+
+    settings = {
+        'num_splits':    args.k,
+        'k_start':       args.k_start,
+        'k_end':         args.k_end,
+        'task':          args.task,
+        'max_epochs':    args.max_epochs,
+        'results_dir':   args.results_dir,
+        'lr':            args.lr,
+        'experiment':    args.exp_code,
+        'reg':           args.reg,
+        'label_frac':    args.label_frac,
+        'bag_loss':      args.bag_loss,
+        'bag_weight':    args.bag_weight,
+        'seed':          args.seed,
+        'model_type':    args.model_type,
+        'weighted_sample': args.weighted_sample,
+        'gc':            args.gc,
+        'opt':           args.opt,
+    }
+
+    dataset = load_dataset(args, marker)
+
+    if not os.path.isdir(args.results_dir):
+        os.mkdir(args.results_dir)
+
+    args.results_dir = os.path.join(
+        args.results_dir, encoder, args.which_splits, args.param_code,
+        str(args.exp_code) + '_s{}'.format(args.seed)
+    )
+    if not os.path.isdir(args.results_dir):
+        os.makedirs(args.results_dir)
+
+    if ('summary_latest.csv' in os.listdir(args.results_dir)) and (not args.overwrite):
+        print("Exp Code <%s> already exists! Skipping." % args.exp_code)
+        return
+
+    args.split_dir = os.path.join('./splits', args.which_splits, args.split_dir)
+    print("split_dir", args.split_dir)
+    assert os.path.isdir(args.split_dir)
+    settings.update({'split_dir': args.split_dir})
+
+    with open(args.results_dir + '/experiment_{}.txt'.format(args.exp_code), 'w') as f:
+        print(settings, file=f)
+
+    print("################# Settings ###################")
+    for key, val in settings.items():
+        print("{}:  {}".format(key, val))
+
+    main(args, dataset)
+
+
+for label in label_list:
+    for encoder in list_encoder:
+        for marker in marker_list:
+            run_experiment(encoder, marker, label)
+

@@ -46,7 +46,7 @@ class Generic_WSI_Survival_Dataset(Dataset):
             slide_data['case_id'] = slide_data.index
             slide_data = slide_data.reset_index(drop=True)
 
-        if "IDC" in slide_data['oncotree_code']: # must be BRCA (and if so, use only IDCs)
+        if 'oncotree_code' in slide_data.columns and "IDC" in slide_data['oncotree_code']: # must be BRCA (and if so, use only IDCs)
             slide_data = slide_data[slide_data['oncotree_code'] == 'IDC']
 
         if not label_col:
