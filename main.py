@@ -21,10 +21,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, sampler
 
 
-# =============================================================================
-# CONFIGURATION — modifier uniquement cette section
-# =============================================================================
-
 # --- Combinaisons à parcourir --------------------------------------------------
 list_encoder = ["openmidnight", "musk", "virchow2", "gpfm", "hibou_l"]
 marker_list  = ["BCL2", "BCL6", "CD10", "HE", "MUM1", "MYC"]
