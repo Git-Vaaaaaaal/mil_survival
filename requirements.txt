@@ -3,9 +3,14 @@
 # torch==2.4.0
 # torchvision
 
-# PyTorch Geometric : doit correspondre à la version torch/CUDA active
-torch_geometric
-torch_sparse
+# PyTorch Geometric : NE PAS installer via ce fichier (torch_sparse n'a pas de wheel
+# précompilée pour toutes les combinaisons torch/CUDA et se remet à compiler depuis les
+# sources, ce qui échoue car "import torch" n'est pas visible dans l'environnement de
+# build isolé de pip). Installer séparément avec les wheels précompilées PyG :
+#   python -c "import torch; print(torch.__version__, torch.version.cuda)"
+#   pip install torch_geometric
+#   pip install torch_sparse -f https://data.pyg.org/whl/torch-<version>+cu<XXX>.html
+# (remplacer <version>/<XXX> par la sortie de la commande python ci-dessus, ex: 2.4.0+cu121)
 
 # reste des dépendances utilisées par le code
 numpy
