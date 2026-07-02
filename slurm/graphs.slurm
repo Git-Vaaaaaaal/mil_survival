@@ -17,18 +17,8 @@ module load pytorch-gpu/py3/2.4.0
 
 source /lustre/fsn1/projects/rech/ehe/udq27fb/mil_survival/pgcn_venv/bin/activate
 # TRIDENT local en premier pour override la version pip (contient Maintenance, IO custom, etc.)
-export PYTHONPATH=/lustre/fsn1/projects/rech/ehe/udq27fb/TMAnalyze/TRIDENT:/lustre/fsn1/projects/rech/ehe/udq27fb/TMAnalyze/tmanalyze_venv/lib/python3.11/site-packages:$PYTHONPATH
-
-# Cache HuggingFace — pointe vers les poids pre-telecharges
-export HF_HOME=/lustre/fsn1/projects/rech/ehe/udq27fb/cache/huggingface
-export HUGGINGFACE_HUB_CACHE=/lustre/fsn1/projects/rech/ehe/udq27fb/cache/huggingface/hub
-export TRANSFORMERS_CACHE=/lustre/fsn1/projects/rech/ehe/udq27fb/cache/huggingface/hub
-# Mode offline : interdit tout appel reseau vers huggingface.co
-export HF_HUB_OFFLINE=1
-
-# Cache PyTorch / torchvision (resnet34 pour TMAx, etc.)
-export TORCH_HOME=/lustre/fsn1/projects/rech/ehe/udq27fb/cache/torch
+export PYTHONPATH=/lustre/fsn1/projects/rech/ehe/udq27fb/mil_survival/pgcn_venv/lib/python3.11/site-packages:$PYTHONPATH
 
 set -x
 
-python /lustre/fsn1/projects/rech/ehe/udq27fb/TMAnalyze/pipeline_offline.py
+python /lustre/fsn1/projects/rech/ehe/udq27fb/mil_survival/create_graphs_from_csv.py
