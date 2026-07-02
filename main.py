@@ -21,17 +21,20 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, sampler
 
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # --- Combinaisons à parcourir --------------------------------------------------
 list_encoder = ["openmidnight", "musk", "virchow2", "gpfm", "hibou_l"]
 marker_list  = ["BCL2", "BCL6", "CD10", "HE", "MUM1", "MYC"]
 label_list = ["PFS", "OS"]
 
-# --- Chemins ------------------------------------------------------------------
-data_root      = 'data_224_reborn'    # racine des données, structure {data_root}/{encoder}/{marker}/graphs
-label_csv_name = "csv/multi_label_patient_id.csv"
+# --- Chemins (ancrés sur l'emplacement du script, peu importe le cwd du job) --
+data_root      = os.path.join(BASE_DIR, 'data_224_reborn')  # racine des données, structure {data_root}/{encoder}/{marker}/graphs
+label_csv_name = os.path.join(BASE_DIR, 'csv', 'multi_label_patient_id.csv')
 
-results_dir   = './results'                  # dossier de sauvegarde des résultats
-which_splits  = '5foldcv'                    # sous-dossier dans ./splits/
+results_dir   = os.path.join(BASE_DIR, 'results')   # dossier de sauvegarde des résultats
+splits_root   = os.path.join(BASE_DIR, 'splits')     # racine des ./splits/{which_splits}/{marker}
+which_splits  = '5foldcv'                            # sous-dossier dans splits_root
 global_summary_path = os.path.join(results_dir, 'summary_all.csv')  # agrège summary_latest.csv de tous les runs
 
 # --- Reproductibilité ---------------------------------------------------------
@@ -259,7 +262,7 @@ def run_experiment(encoder, marker, label):
         append_to_global_summary(results_latest_df, encoder, marker, label, args)
         return
 
-    args.split_dir = os.path.join('./splits', args.which_splits, args.split_dir)
+    args.split_dir = os.path.join(splits_root, args.which_splits, args.split_dir)
     print("split_dir", args.split_dir)
     assert os.path.isdir(args.split_dir)
     settings.update({'split_dir': args.split_dir})

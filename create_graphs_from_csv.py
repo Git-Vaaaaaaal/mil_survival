@@ -12,6 +12,8 @@ import torch
 from torch_geometric.data import Data
 from sklearn.neighbors import kneighbors_graph
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 ENCODER_CFG = {
     "prism":   dict(in_shape=2560, tiles_subdir="features_virchow",   slide_subdir="slide_features_prism",  slide_csv="prism_encoder.csv"),
     "titan":   dict(in_shape=768,  tiles_subdir="features_conch_v15", slide_subdir="slide_features_titan",  slide_csv="titan_encoder.csv"),
@@ -83,8 +85,8 @@ marker_list = ["BCL2", "BCL6", "CD10", "HE", "MUM1", "MYC"]
 
 for encoder in list_encoder:
     for marker in marker_list:
-        csv_dir = os.path.join("data_224_reborn", encoder, marker, ENCODER_CFG[encoder]["tiles_subdir"])
-        output_dir = os.path.join("data_224_reborn", encoder, marker, "graphs")
+        csv_dir = os.path.join(BASE_DIR, "data_224_reborn", encoder, marker, ENCODER_CFG[encoder]["tiles_subdir"])
+        output_dir = os.path.join(BASE_DIR, "data_224_reborn", encoder, marker, "graphs")
         k_neighbors = 6      # nombre de voisins spatiaux par patch
         overwrite   = False  # True pour re-générer les fichiers existants
 
