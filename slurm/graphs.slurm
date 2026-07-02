@@ -1,7 +1,7 @@
 #!/bin/bash
-#SBATCH --job-name=training   # nom du job
-#SBATCH --output=training.out  # fichier de sortie (%j = job ID)
-#SBATCH --error=training.err   # fichier d'erreur (%j = job ID)
+#SBATCH --job-name=graphs   # nom du job
+#SBATCH --output=graphs.out  # fichier de sortie (%j = job ID)
+#SBATCH --error=graphs.err   # fichier d'erreur (%j = job ID)
 #SBATCH --constraint=h100               # demander des GPU H100 80 Go
 #SBATCH --nodes=1                       # reserver 1 noeud
 #SBATCH --ntasks=1                      # 1 tache shell (les shards sont des sous-processus)

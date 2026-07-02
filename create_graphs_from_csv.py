@@ -12,6 +12,16 @@ import torch
 from torch_geometric.data import Data
 from sklearn.neighbors import kneighbors_graph
 
+ENCODER_CFG = {
+    "prism":   dict(in_shape=2560, tiles_subdir="features_virchow",   slide_subdir="slide_features_prism",  slide_csv="prism_encoder.csv"),
+    "titan":   dict(in_shape=768,  tiles_subdir="features_conch_v15", slide_subdir="slide_features_titan",  slide_csv="titan_encoder.csv"),
+    "feather": dict(in_shape=768,  tiles_subdir="features_conch_v15", slide_subdir="slide_features_feather", slide_csv="feather_encoder.csv"),
+    "gpfm": dict(in_shape=1024,  tiles_subdir="features_gpfm", slide_subdir="", slide_csv=""),
+    "musk": dict(in_shape=1024,  tiles_subdir="features_musk", slide_subdir="", slide_csv=""),
+    "openmidnight": dict(in_shape=1536,  tiles_subdir="features_openmidnight", slide_subdir="", slide_csv=""),
+    "hibou_l": dict(in_shape=1024,  tiles_subdir="features_hibou_l", slide_subdir="", slide_csv=""),
+    "virchow2": dict(in_shape=2560,  tiles_subdir="features_virchow2", slide_subdir="", slide_csv=""),
+}
 
 def build_graph(csv_path: str, k: int) -> Data:
     df = pd.read_csv(csv_path)
@@ -73,7 +83,7 @@ marker_list = ["BCL2", "BCL6", "CD10", "HE", "MUM1", "MYC"]
 
 for encoder in list_encoder:
     for marker in marker_list:
-        csv_dir = os.path.join("data_224_reborn", encoder, marker, "patches")
+        csv_dir = os.path.join("data_224_reborn", encoder, marker, ENCODER_CFG[encoder]["tiles_subdir"])
         output_dir = os.path.join("data_224_reborn", encoder, marker, "graphs")
         k_neighbors = 6      # nombre de voisins spatiaux par patch
         overwrite   = False  # True pour re-générer les fichiers existants
