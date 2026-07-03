@@ -1,16 +1,14 @@
-# PyTorch : sur le cluster, provient normalement de "module load pytorch-gpu/py3/2.4.0"
-# (ne pas réinstaller ici si le venv utilise --system-site-packages ; sinon décommenter) :
-# torch==2.4.0
-# torchvision
+# PyTorch : fourni par "module load pytorch-gpu/py3/2.4.0" (torch 2.4.0 + CUDA 12.4.1).
+# NE PAS installer torch via pip -r (déjà fourni par le module). torchvision doit
+# être installé séparément avec --no-deps pour ne pas laisser pip réinstaller torch :
+#   pip install --no-deps torchvision==0.19.0 --index-url https://download.pytorch.org/whl/cu124
 
 # PyTorch Geometric : NE PAS installer via ce fichier (torch_sparse n'a pas de wheel
 # précompilée pour toutes les combinaisons torch/CUDA et se remet à compiler depuis les
 # sources, ce qui échoue car "import torch" n'est pas visible dans l'environnement de
 # build isolé de pip). Installer séparément avec les wheels précompilées PyG :
-#   python -c "import torch; print(torch.__version__, torch.version.cuda)"
 #   pip install torch_geometric
-#   pip install torch_sparse -f https://data.pyg.org/whl/torch-2.12.1+cu130.html
-# (remplacer <version>/<XXX> par la sortie de la commande python ci-dessus, ex: 2.4.0+cu121)
+#   pip install torch_sparse -f https://data.pyg.org/whl/torch-2.4.0+cu124.html
 
 # reste des dépendances utilisées par le code
 numpy

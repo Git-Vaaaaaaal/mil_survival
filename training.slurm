@@ -13,7 +13,7 @@
 
 module purge
 module load arch/h100
-module load pytorch-gpu/py3/2.4.0
+#module load pytorch-gpu/py3/2.4.0
 
 source /lustre/fsn1/projects/rech/ehe/udq27fb/mil_survival/pgcn_venv/bin/activate
 # TRIDENT local en premier pour override la version pip (contient Maintenance, IO custom, etc.)
