@@ -96,7 +96,7 @@ ENCODER_CFG = {
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_time'
-    df = df[df[marker] == marker].copy()
+    df = df[df['stain'] == marker].copy()
     df['case_id'] = df['patient_id']
     mask = df[element_time] > 5.0
     df.loc[mask, "status"] = 0
