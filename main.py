@@ -7,6 +7,7 @@ from timeit import default_timer as timer
 
 import numpy as np
 import pandas as pd
+from sklearn.model_selection import KFold
 
 ### Internal Imports
 from datasets.dataset_survival import Generic_WSI_Survival_Dataset, Generic_MIL_Survival_Dataset
@@ -104,6 +105,45 @@ def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_ti
     df = df.rename(columns={"status": "censorship", "patient_id": "slide_id"})
     df = df[['case_id', 'slide_id', 'censorship', element_time]]
     return df
+
+
+def generate_splits_for_marker(df, marker, out_dir, k, seed):
+    """K-fold sur old_patient_id (patient réel) pour éviter qu'un même patient
+    (parfois présent sous plusieurs patient_id/slide_id) se retrouve à la fois
+    en train et en val."""
+    marker_df = df[df['stain'] == marker]
+    patients = marker_df['old_patient_id'].unique()
+    os.makedirs(out_dir, exist_ok=True)
+
+    kf = KFold(n_splits=k, shuffle=True, random_state=seed)
+    for fold_idx, (train_pos, val_pos) in enumerate(kf.split(patients)):
+        train_patients = set(patients[train_pos])
+        val_patients = set(patients[val_pos])
+
+        train_slides = (marker_df.loc[marker_df['old_patient_id'].isin(train_patients), 'patient_id']
+                         .astype(int).astype(str).tolist())
+        val_slides = (marker_df.loc[marker_df['old_patient_id'].isin(val_patients), 'patient_id']
+                       .astype(int).astype(str).tolist())
+
+        split_df = pd.concat([
+            pd.Series(train_slides, name='train'),
+            pd.Series(val_slides, name='val'),
+        ], axis=1)
+        split_df.to_csv(os.path.join(out_dir, 'splits_{}.csv'.format(fold_idx)))
+
+    print("Splits générés pour {}: {} patients, {} lames -> {}".format(marker, len(patients), len(marker_df), out_dir))
+
+
+def ensure_splits(label_csv_name, marker_list, splits_root, which_splits, k, seed):
+    df = None
+    for marker in marker_list:
+        out_dir = os.path.join(splits_root, which_splits, marker)
+        last_split = os.path.join(out_dir, 'splits_{}.csv'.format(k - 1))
+        if os.path.isfile(last_split):
+            continue
+        if df is None:
+            df = pd.read_csv(label_csv_name)
+        generate_splits_for_marker(df, marker, out_dir, k, seed)
 
 
 def seed_torch(seed=7):
@@ -277,6 +317,8 @@ def run_experiment(encoder, marker, label):
     results_latest_df = main(args, dataset)
     append_to_global_summary(results_latest_df, encoder, marker, label, args)
 
+
+ensure_splits(label_csv_name, marker_list, splits_root, which_splits, k, seed)
 
 for label in label_list:
     for encoder in list_encoder:
