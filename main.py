@@ -58,7 +58,6 @@ num_gcn_layers = 4           # nombre de couches GCN (PatchGCN uniquement)
 edge_agg       = 'spatial'   # type d'arêtes : 'spatial' | 'latent'
 resample       = 0.0         # taux de dropout des patches (0 = désactivé)
 drop_out       = True        # dropout interne au modèle (p=0.25)
-encoding_size  = 1024        # dimension des embeddings en entrée
 
 # --- Optimiseur ---------------------------------------------------------------
 opt        = 'adam'  # 'adam' | 'sgd'

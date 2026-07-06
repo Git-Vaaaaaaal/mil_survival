@@ -9,7 +9,7 @@
 # build isolé de pip). Installer séparément avec les wheels précompilées PyG :
 #   pip install torch_geometric
 #   pip install torch_sparse -f https://data.pyg.org/whl/torch-2.4.0+cu124.html
-
+#  pip install torch_scatter -f https://data.pyg.org/whl/torch-2.4.0+cu124.html
 # reste des dépendances utilisées par le code
 numpy
 pandas

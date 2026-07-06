@@ -245,7 +245,7 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
             loss_reg = reg_fn(model) * lambda_reg
 
         risk = -torch.sum(S, dim=1).detach().cpu().numpy()
-        all_risk_scores[batch_idx] = risk
+        all_risk_scores[batch_idx] = risk.item()
         all_censorships[batch_idx] = c.item()
         all_event_times[batch_idx] = event_time
 
@@ -258,7 +258,7 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
         loss = loss / gc + loss_reg
         loss.backward()
 
-        if (batch_idx + 1) % gc == 0: 
+        if (batch_idx + 1) % gc == 0:
             optimizer.step()
             optimizer.zero_grad()
 
@@ -266,7 +266,7 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
     train_loss_surv /= len(loader)
     train_loss /= len(loader)
 
-    # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships) 
+    # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
     c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
@@ -309,8 +309,8 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
             loss_reg = reg_fn(model) * lambda_reg
 
         risk = -torch.sum(S, dim=1).cpu().numpy()
-        all_risk_scores[batch_idx] = risk
-        all_censorships[batch_idx] = c.cpu().numpy()
+        all_risk_scores[batch_idx] = risk.item()
+        all_censorships[batch_idx] = c.item()
         all_event_times[batch_idx] = event_time
 
         val_loss_surv += loss_value
@@ -328,7 +328,7 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
     if early_stopping:
         assert results_dir
         early_stopping(epoch, val_loss_surv, model, ckpt_name=os.path.join(results_dir, "s_{}_minloss_checkpoint.pt".format(cur)))
-        
+
         if early_stopping.early_stop:
             print("Early stopping")
             return True, val_loss_surv, val_loss, c_index
@@ -362,9 +362,9 @@ def summary_survival(model, loader, n_classes):
         with torch.no_grad():
             hazards, survival, Y_hat, _, _ = model(x_path=data_WSI)
 
-        risk = np.asscalar(-torch.sum(survival, dim=1).cpu().numpy())
-        event_time = np.asscalar(event_time)
-        c = np.asscalar(c)
+        risk = (-torch.sum(survival, dim=1).cpu()).item()
+        event_time = event_time.item() if torch.is_tensor(event_time) else float(event_time)
+        c = c.item() if torch.is_tensor(c) else float(c)
         all_risk_scores[batch_idx] = risk
         all_censorships[batch_idx] = c
         all_event_times[batch_idx] = event_time
@@ -374,7 +374,7 @@ def summary_survival(model, loader, n_classes):
     return patient_results, c_index
 
 
-def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16):   
+def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu") 
     model.train()
     train_loss_surv, train_loss = 0., 0.
@@ -400,7 +400,7 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
             loss_reg = reg_fn(model) * lambda_reg
 
         risk = -torch.sum(S, dim=1).detach().cpu().numpy()
-        all_risk_scores[batch_idx] = risk
+        all_risk_scores[batch_idx] = risk.item()
         all_censorships[batch_idx] = c.item()
         all_event_times[batch_idx] = event_time
 
@@ -413,7 +413,7 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
         loss = loss / gc + loss_reg
         loss.backward()
 
-        if (batch_idx + 1) % gc == 0: 
+        if (batch_idx + 1) % gc == 0:
             optimizer.step()
             optimizer.zero_grad()
 
@@ -421,7 +421,7 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
     train_loss_surv /= len(loader)
     train_loss /= len(loader)
 
-    # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships) 
+    # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
     c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
@@ -459,8 +459,8 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
             loss_reg = reg_fn(model) * lambda_reg
 
         risk = -torch.sum(S, dim=1).cpu().numpy()
-        all_risk_scores[batch_idx] = risk
-        all_censorships[batch_idx] = c.cpu().numpy()
+        all_risk_scores[batch_idx] = risk.item()
+        all_censorships[batch_idx] = c.item()
         all_event_times[batch_idx] = event_time
 
         val_loss_surv += loss_value
@@ -478,7 +478,7 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
     if early_stopping:
         assert results_dir
         early_stopping(epoch, val_loss_surv, model, ckpt_name=os.path.join(results_dir, "s_{}_minloss_checkpoint.pt".format(cur)))
-        
+
         if early_stopping.early_stop:
             print("Early stopping")
             return True, val_loss_surv, val_loss, c_index
@@ -507,9 +507,9 @@ def summary_survival_cluster(model, loader, n_classes):
         with torch.no_grad():
             hazards, survival, Y_hat, _, _ = model(x_path=data_WSI, cluster_id=cluster_id)
 
-        risk = np.asscalar(-torch.sum(survival, dim=1).cpu().numpy())
-        event_time = np.asscalar(event_time)
-        c = np.asscalar(c)
+        risk = (-torch.sum(survival, dim=1).cpu()).item()
+        event_time = event_time.item() if torch.is_tensor(event_time) else float(event_time)
+        c = c.item() if torch.is_tensor(c) else float(c)
         all_risk_scores[batch_idx] = risk
         all_censorships[batch_idx] = c
         all_event_times[batch_idx] = event_time
