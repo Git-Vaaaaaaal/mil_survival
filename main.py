@@ -99,7 +99,7 @@ def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_ti
     df = df[df['stain'] == marker].copy()
     df['case_id'] = df['patient_id']
     mask = df[element_time] > 5.0
-    df.loc[mask, "status"] = 0
+    df.loc[mask, "status"] = 1
     df.loc[mask, element_time] = 5.0
     df = df.rename(columns={"status": "censorship", "patient_id": "slide_id"})
     df = df[['case_id', 'slide_id', 'censorship', element_time]]
