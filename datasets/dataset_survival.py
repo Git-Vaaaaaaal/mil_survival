@@ -40,7 +40,10 @@ class Generic_WSI_Survival_Dataset(Dataset):
         self.train_ids, self.val_ids, self.test_ids  = (None, None, None)
         self.data_dir = None
 
-        slide_data = pd.read_csv(csv_path, index_col=0, low_memory=False)
+        if isinstance(csv_path, pd.DataFrame):
+            slide_data = csv_path.copy()
+        else:
+            slide_data = pd.read_csv(csv_path, index_col=0, low_memory=False)
         if 'case_id' not in slide_data:
             slide_data.index = slide_data.index.str[:12]
             slide_data['case_id'] = slide_data.index
