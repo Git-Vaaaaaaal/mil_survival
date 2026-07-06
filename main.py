@@ -101,7 +101,7 @@ def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_ti
     mask = df[element_time] > 5.0
     df.loc[mask, "status"] = 0
     df.loc[mask, element_time] = 5.0
-    df = df.rename(columns={"status": "censorship"})
+    df = df.rename(columns={"status": "censorship", "patient_id": "slide_id"})
     df = df[['case_id', 'slide_id', 'censorship', element_time]]
     return df
 
