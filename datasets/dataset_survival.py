@@ -106,6 +106,11 @@ class Generic_WSI_Survival_Dataset(Dataset):
             key = (key, int(censorship))
             slide_data.at[i, 'label'] = label_dict[key]
 
+        # .at[] sur une colonne encore vide infère du float64 ; torch.gather exige
+        # un index int64, donc on force le dtype entier ici.
+        slide_data['disc_label'] = slide_data['disc_label'].astype(int)
+        slide_data['label'] = slide_data['label'].astype(int)
+
         self.bins = q_bins
         self.num_classes=len(self.label_dict)
         patients_df = slide_data.drop_duplicates(['case_id'])
