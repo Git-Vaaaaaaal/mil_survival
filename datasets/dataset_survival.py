@@ -78,10 +78,10 @@ class Generic_WSI_Survival_Dataset(Dataset):
         slide_data = slide_data.set_index('case_id')
         for patient in patients_df['case_id']:
             slide_ids = slide_data.loc[patient, 'slide_id']
-            if isinstance(slide_ids, str):
-                slide_ids = np.array(slide_ids).reshape(-1)
-            else:
+            if isinstance(slide_ids, pd.Series):
                 slide_ids = slide_ids.values
+            else:
+                slide_ids = np.array(slide_ids).reshape(-1)
             patient_dict.update({patient:slide_ids})
 
         self.patient_dict = patient_dict
