@@ -244,8 +244,8 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
         else:
             loss_reg = reg_fn(model) * lambda_reg
 
-        risk = -torch.sum(S, dim=1).detach().cpu().numpy()
-        all_risk_scores[batch_idx] = risk.item()
+        risk = (-torch.sum(S, dim=1).detach().cpu().numpy()).item()
+        all_risk_scores[batch_idx] = risk
         all_censorships[batch_idx] = c.item()
         all_event_times[batch_idx] = event_time
 
@@ -399,8 +399,8 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
         else:
             loss_reg = reg_fn(model) * lambda_reg
 
-        risk = -torch.sum(S, dim=1).detach().cpu().numpy()
-        all_risk_scores[batch_idx] = risk.item()
+        risk = (-torch.sum(S, dim=1).detach().cpu().numpy()).item()
+        all_risk_scores[batch_idx] = risk
         all_censorships[batch_idx] = c.item()
         all_event_times[batch_idx] = event_time
 
