@@ -210,6 +210,7 @@ def main(args, dataset):
     fold_end   = args.k   if args.k_end   == -1 else args.k_end
 
     latest_val_cindex = []
+    processed_folds = []
     folds = np.arange(fold_start, fold_end)
 
     for i in folds:
@@ -232,12 +233,13 @@ def main(args, dataset):
         if args.task_type == 'survival':
             val_latest, cindex_latest = train(datasets, i, args)
             latest_val_cindex.append(cindex_latest)
+            processed_folds.append(i)
 
         save_pkl(results_pkl_path, val_latest)
         print('Fold %d Time: %f seconds' % (i, timer() - t_start))
 
     if args.task_type == 'survival':
-        results_latest_df = pd.DataFrame({'folds': folds, 'val_cindex': latest_val_cindex})
+        results_latest_df = pd.DataFrame({'folds': processed_folds, 'val_cindex': latest_val_cindex})
 
     results_latest_df.to_csv(os.path.join(args.results_dir, 'summary_latest.csv'))
     return results_latest_df
