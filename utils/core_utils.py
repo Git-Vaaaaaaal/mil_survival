@@ -6,7 +6,7 @@ import pickle
 from lifelines.utils import concordance_index
 import numpy as np
 import pandas as pd
-from sksurv.metrics import concordance_index_censored
+from sksurv.metrics import concordance_index_censored, concordance_index_ipcw
 
 import torch
 
@@ -267,7 +267,7 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
     train_loss /= len(loader)
 
     # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
-    c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
 
@@ -318,7 +318,7 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
 
     val_loss_surv /= len(loader)
     val_loss /= len(loader)
-    c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
 
     if writer:
         writer.add_scalar('val/loss_surv', val_loss_surv, epoch)
@@ -370,7 +370,7 @@ def summary_survival(model, loader, n_classes):
         all_event_times[batch_idx] = event_time
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'risk': risk, 'disc_label': label.item(), 'survival': event_time, 'censorship': c}})
 
-    c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
     return patient_results, c_index
 
 
@@ -422,7 +422,7 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
     train_loss /= len(loader)
 
     # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
-    c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
 
@@ -468,7 +468,7 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
 
     val_loss_surv /= len(loader)
     val_loss /= len(loader)
-    c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
 
     if writer:
         writer.add_scalar('val/loss_surv', val_loss_surv, epoch)
@@ -515,5 +515,5 @@ def summary_survival_cluster(model, loader, n_classes):
         all_event_times[batch_idx] = event_time
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'risk': risk, 'disc_label': label.item(), 'survival': event_time, 'censorship': c}})
 
-    c_index = concordance_index_censored((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
     return patient_results, c_index
