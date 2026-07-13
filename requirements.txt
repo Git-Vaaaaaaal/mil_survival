@@ -19,3 +19,4 @@ scikit-survival
 lifelines
 tensorboardX
 h5py
+matplotlib

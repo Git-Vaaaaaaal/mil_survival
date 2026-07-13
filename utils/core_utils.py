@@ -16,6 +16,15 @@ from models.model_graph_mil import *
 from utils.utils import *
 
 
+def to_structured_survival(censorships, event_times):
+    """Construit le tableau structure (event, time) attendu par concordance_index_ipcw.
+    event = True si l'evenement a ete observe (censorship == 0)."""
+    censorships = np.asarray(censorships)
+    event_times = np.asarray(event_times, dtype=float)
+    event_indicator = (1 - censorships).astype(bool)
+    return np.array(list(zip(event_indicator, event_times)), dtype=[('event', bool), ('time', float)])
+
+
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
     def __init__(self, warmup=5, patience=15, stop_epoch=20, verbose=False):
@@ -114,6 +123,13 @@ def train(datasets: tuple, cur: int, args: Namespace):
     train_split, val_split = datasets
     save_splits(datasets, ['train', 'val'], os.path.join(args.results_dir, 'splits_{}.csv'.format(cur)))
     print('Done!')
+
+    # Distribution de survie du train set : sert de reference (censoring KM) a
+    # concordance_index_ipcw, aussi bien pour le c-index train que val.
+    train_survival = to_structured_survival(
+        train_split.slide_data['censorship'].values,
+        train_split.slide_data[train_split.label_col].values,
+    )
     print("Training on {} samples".format(len(train_split)))
     print("Validating on {} samples".format(len(val_split)))
 
@@ -187,11 +203,11 @@ def train(datasets: tuple, cur: int, args: Namespace):
     for epoch in range(args.max_epochs):
         if args.task_type == 'survival':
             if args.mode == 'cluster':
-                train_loss_surv, train_loss, train_c_index = train_loop_survival_cluster(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc, VAE)
-                stop, val_loss_surv, val_loss, val_c_index = validate_survival_cluster(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir, VAE)
+                train_loss_surv, train_loss, train_c_index = train_loop_survival_cluster(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc, VAE, train_survival=train_survival)
+                stop, val_loss_surv, val_loss, val_c_index = validate_survival_cluster(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir, VAE, train_survival=train_survival)
             else:
-                train_loss_surv, train_loss, train_c_index = train_loop_survival(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc)
-                stop, val_loss_surv, val_loss, val_c_index = validate_survival(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir)
+                train_loss_surv, train_loss, train_c_index = train_loop_survival(epoch, model, train_loader, optimizer, args.n_classes, writer, loss_fn, reg_fn, args.lambda_reg, args.gc, train_survival=train_survival)
+                stop, val_loss_surv, val_loss, val_c_index = validate_survival(cur, epoch, model, val_loader, args.n_classes, early_stopping, monitor_cindex, writer, loss_fn, reg_fn, args.lambda_reg, args.results_dir, train_survival=train_survival)
 
         loss_history['epoch'].append(epoch)
         loss_history['train_loss_surv'].append(train_loss_surv)
@@ -208,13 +224,13 @@ def train(datasets: tuple, cur: int, args: Namespace):
 
     torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
     model.load_state_dict(torch.load(os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur))))
-    results_val_dict, val_cindex = summary_survival(model, val_loader, args.n_classes)
+    results_val_dict, val_cindex = summary_survival(model, val_loader, args.n_classes, train_survival=train_survival)
     print('Val c-Index: {:.4f}'.format(val_cindex))
     writer.close()
     return results_val_dict, val_cindex
 
 
-def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16):   
+def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16, train_survival=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu") 
     model.train()
     train_loss_surv, train_loss = 0., 0.
@@ -267,7 +283,8 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
     train_loss /= len(loader)
 
     # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
-    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    survival_test = to_structured_survival(all_censorships, all_event_times)
+    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
 
@@ -279,7 +296,7 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
     return train_loss_surv, train_loss, c_index
 
 
-def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None, monitor_cindex=None, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., results_dir=None):
+def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None, monitor_cindex=None, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., results_dir=None, train_survival=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     val_loss_surv, val_loss = 0., 0.
@@ -318,7 +335,8 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
 
     val_loss_surv /= len(loader)
     val_loss /= len(loader)
-    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    survival_test = to_structured_survival(all_censorships, all_event_times)
+    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
 
     if writer:
         writer.add_scalar('val/loss_surv', val_loss_surv, epoch)
@@ -336,7 +354,7 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
     return False, val_loss_surv, val_loss, c_index
 
 
-def summary_survival(model, loader, n_classes):
+def summary_survival(model, loader, n_classes, train_survival=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     test_loss = 0.
@@ -370,11 +388,12 @@ def summary_survival(model, loader, n_classes):
         all_event_times[batch_idx] = event_time
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'risk': risk, 'disc_label': label.item(), 'survival': event_time, 'censorship': c}})
 
-    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    survival_test = to_structured_survival(all_censorships, all_event_times)
+    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
     return patient_results, c_index
 
 
-def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16):
+def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16, train_survival=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu") 
     model.train()
     train_loss_surv, train_loss = 0., 0.
@@ -422,7 +441,8 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
     train_loss /= len(loader)
 
     # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
-    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    survival_test = to_structured_survival(all_censorships, all_event_times)
+    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
 
@@ -434,7 +454,7 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
     return train_loss_surv, train_loss, c_index
 
 
-def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stopping=None, monitor_cindex=None, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., results_dir=None):
+def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stopping=None, monitor_cindex=None, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., results_dir=None, train_survival=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     val_loss_surv, val_loss = 0., 0.
@@ -468,7 +488,8 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
 
     val_loss_surv /= len(loader)
     val_loss /= len(loader)
-    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    survival_test = to_structured_survival(all_censorships, all_event_times)
+    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
 
     if writer:
         writer.add_scalar('val/loss_surv', val_loss_surv, epoch)
@@ -486,7 +507,7 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
     return False, val_loss_surv, val_loss, c_index
 
 
-def summary_survival_cluster(model, loader, n_classes):
+def summary_survival_cluster(model, loader, n_classes, train_survival=None):
     device=torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.eval()
     test_loss = 0.
@@ -515,5 +536,6 @@ def summary_survival_cluster(model, loader, n_classes):
         all_event_times[batch_idx] = event_time
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'risk': risk, 'disc_label': label.item(), 'survival': event_time, 'censorship': c}})
 
-    c_index = concordance_index_ipcw((1-all_censorships).astype(bool), all_event_times, all_risk_scores, tied_tol=1e-08)[0]
+    survival_test = to_structured_survival(all_censorships, all_event_times)
+    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
     return patient_results, c_index
