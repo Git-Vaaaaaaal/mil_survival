@@ -196,12 +196,13 @@ class Generic_WSI_Survival_Dataset(Dataset):
         if from_id:
             raise NotImplementedError
         else:
-            assert csv_path 
+            assert csv_path
             all_splits = pd.read_csv(csv_path)
             train_split = self.get_split_from_df(all_splits=all_splits, split_key='train')
             val_split = self.get_split_from_df(all_splits=all_splits, split_key='val')
+            test_split = self.get_split_from_df(all_splits=all_splits, split_key='test') if 'test' in all_splits.columns else None
 
-        return train_split, val_split
+        return train_split, val_split, test_split
 
 
     def get_list(self, ids):

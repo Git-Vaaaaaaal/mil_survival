@@ -7,10 +7,9 @@ from timeit import default_timer as timer
 
 import numpy as np
 import pandas as pd
-from sklearn.model_selection import KFold
 
 ### Internal Imports
-from datasets.dataset_survival import Generic_WSI_Survival_Dataset, Generic_MIL_Survival_Dataset
+from datasets.dataset_survival import Generic_MIL_Survival_Dataset
 from utils.file_utils import save_pkl, load_pkl
 from utils.core_utils import train
 from utils.utils import get_custom_exp_code
@@ -35,16 +34,18 @@ label_csv_name = os.path.join(BASE_DIR, 'csv', 'multi_label_patient_id.csv')
 
 results_dir   = os.path.join(BASE_DIR, 'results')   # dossier de sauvegarde des résultats
 splits_root   = os.path.join(BASE_DIR, 'splits')     # racine des ./splits/{which_splits}/{marker}
-which_splits  = '5foldcv'                            # sous-dossier dans splits_root
+which_splits  = 'holdout'                            # sous-dossier dans splits_root
 global_summary_path = os.path.join(results_dir, 'summary_all.csv')  # agrège summary_latest.csv de tous les runs
 
 # --- Reproductibilité ---------------------------------------------------------
 seed = 42
 
-# --- Cross-validation ---------------------------------------------------------
-k       = 5    # nombre total de folds
-k_start = -1   # fold de départ (-1 = 0)
-k_end   = -1   # fold de fin    (-1 = k)
+# --- Split train / val / test (unique, pas de cross-validation) ---------------
+train_frac = 0.7
+val_frac   = 0.15   # test_frac = 1 - train_frac - val_frac = 0.15
+k       = 1    # un seul "fold" = le split unique
+k_start = -1   # (-1 = 0)
+k_end   = -1   # (-1 = k)
 
 # --- Logs / debug -------------------------------------------------------------
 log_data  = True   # activer TensorBoard
@@ -106,43 +107,50 @@ def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_ti
     return df
 
 
-def generate_splits_for_marker(df, marker, out_dir, k, seed):
-    """K-fold sur old_patient_id (patient réel) pour éviter qu'un même patient
-    (parfois présent sous plusieurs patient_id/slide_id) se retrouve à la fois
-    en train et en val."""
+def generate_splits_for_marker(df, marker, out_dir, train_frac, val_frac, seed):
+    """Split unique train/val/test sur old_patient_id (patient réel) pour éviter
+    qu'un même patient (parfois présent sous plusieurs patient_id/slide_id) se
+    retrouve dans plusieurs partitions."""
     marker_df = df[df['stain'] == marker]
-    patients = marker_df['old_patient_id'].unique()
+    patients = marker_df['old_patient_id'].unique().copy()
     os.makedirs(out_dir, exist_ok=True)
 
-    kf = KFold(n_splits=k, shuffle=True, random_state=seed)
-    for fold_idx, (train_pos, val_pos) in enumerate(kf.split(patients)):
-        train_patients = set(patients[train_pos])
-        val_patients = set(patients[val_pos])
+    rng = np.random.RandomState(seed)
+    rng.shuffle(patients)
 
-        train_slides = (marker_df.loc[marker_df['old_patient_id'].isin(train_patients), 'patient_id']
-                         .astype(int).astype(str).tolist())
-        val_slides = (marker_df.loc[marker_df['old_patient_id'].isin(val_patients), 'patient_id']
-                       .astype(int).astype(str).tolist())
+    n = len(patients)
+    n_train = int(round(n * train_frac))
+    n_val = int(round(n * val_frac))
 
-        split_df = pd.concat([
-            pd.Series(train_slides, name='train'),
-            pd.Series(val_slides, name='val'),
-        ], axis=1)
-        split_df.to_csv(os.path.join(out_dir, 'splits_{}.csv'.format(fold_idx)))
+    train_patients = set(patients[:n_train])
+    val_patients = set(patients[n_train:n_train + n_val])
+    test_patients = set(patients[n_train + n_val:])
 
-    print("Splits générés pour {}: {} patients, {} lames -> {}".format(marker, len(patients), len(marker_df), out_dir))
+    def slides_for(patients_subset):
+        return (marker_df.loc[marker_df['old_patient_id'].isin(patients_subset), 'patient_id']
+                .astype(int).astype(str).tolist())
+
+    split_df = pd.concat([
+        pd.Series(slides_for(train_patients), name='train'),
+        pd.Series(slides_for(val_patients), name='val'),
+        pd.Series(slides_for(test_patients), name='test'),
+    ], axis=1)
+    split_df.to_csv(os.path.join(out_dir, 'splits_0.csv'))
+
+    print("Split généré pour {}: {} patients (train={}, val={}, test={}), {} lames -> {}".format(
+        marker, n, len(train_patients), len(val_patients), len(test_patients), len(marker_df), out_dir))
 
 
-def ensure_splits(label_csv_name, marker_list, splits_root, which_splits, k, seed):
+def ensure_splits(label_csv_name, marker_list, splits_root, which_splits, train_frac, val_frac, seed):
     df = None
     for marker in marker_list:
         out_dir = os.path.join(splits_root, which_splits, marker)
-        last_split = os.path.join(out_dir, 'splits_{}.csv'.format(k - 1))
-        if os.path.isfile(last_split):
+        split_path = os.path.join(out_dir, 'splits_0.csv')
+        if os.path.isfile(split_path):
             continue
         if df is None:
             df = pd.read_csv(label_csv_name)
-        generate_splits_for_marker(df, marker, out_dir, k, seed)
+        generate_splits_for_marker(df, marker, out_dir, train_frac, val_frac, seed)
 
 
 def seed_torch(seed=7):
@@ -210,6 +218,7 @@ def main(args, dataset):
     fold_end   = args.k   if args.k_end   == -1 else args.k_end
 
     latest_val_cindex = []
+    latest_test_cindex = []
     processed_folds = []
     folds = np.arange(fold_start, fold_end)
 
@@ -223,23 +232,24 @@ def main(args, dataset):
             print("Skipping Split %d" % i)
             continue
 
-        train_dataset, val_dataset = dataset.return_splits(
+        train_dataset, val_dataset, test_dataset = dataset.return_splits(
             from_id=False,
             csv_path='{}/splits_{}.csv'.format(args.split_dir, i)
         )
-        print('training: {}, validation: {}'.format(len(train_dataset), len(val_dataset)))
-        datasets = (train_dataset, val_dataset)
+        print('training: {}, validation: {}, test: {}'.format(len(train_dataset), len(val_dataset), len(test_dataset)))
+        datasets = (train_dataset, val_dataset, test_dataset)
 
         if args.task_type == 'survival':
-            val_latest, cindex_latest = train(datasets, i, args)
-            latest_val_cindex.append(cindex_latest)
+            test_latest, val_cindex, test_cindex = train(datasets, i, args)
+            latest_val_cindex.append(val_cindex)
+            latest_test_cindex.append(test_cindex)
             processed_folds.append(i)
 
-        save_pkl(results_pkl_path, val_latest)
+        save_pkl(results_pkl_path, test_latest)
         print('Fold %d Time: %f seconds' % (i, timer() - t_start))
 
     if args.task_type == 'survival':
-        results_latest_df = pd.DataFrame({'folds': processed_folds, 'val_cindex': latest_val_cindex})
+        results_latest_df = pd.DataFrame({'folds': processed_folds, 'val_cindex': latest_val_cindex, 'test_cindex': latest_test_cindex})
 
     results_latest_df.to_csv(os.path.join(args.results_dir, 'summary_latest.csv'))
     return results_latest_df
@@ -319,7 +329,7 @@ def run_experiment(encoder, marker, label):
     append_to_global_summary(results_latest_df, encoder, marker, label, args)
 
 
-ensure_splits(label_csv_name, marker_list, splits_root, which_splits, k, seed)
+ensure_splits(label_csv_name, marker_list, splits_root, which_splits, train_frac, val_frac, seed)
 
 for label in label_list:
     for encoder in list_encoder:

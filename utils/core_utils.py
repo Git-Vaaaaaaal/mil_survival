@@ -25,6 +25,35 @@ def to_structured_survival(censorships, event_times):
     return np.array(list(zip(event_indicator, event_times)), dtype=[('event', bool), ('time', float)])
 
 
+def save_loss_curves(loss_history, out_path):
+    """Trace les courbes train/val (loss et c-index) et enregistre un PNG."""
+    try:
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+    except ImportError:
+        print("matplotlib non disponible, courbes non generees.")
+        return
+
+    epochs = loss_history['epoch']
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+
+    ax1.plot(epochs, loss_history['train_loss'], label='train_loss')
+    ax1.plot(epochs, loss_history['val_loss'], label='val_loss')
+    ax1.set_xlabel('epoch'); ax1.set_ylabel('loss'); ax1.set_title('Loss')
+    ax1.legend(); ax1.grid(alpha=0.3)
+
+    ax2.plot(epochs, loss_history['train_c_index'], label='train_c_index')
+    ax2.plot(epochs, loss_history['val_c_index'], label='val_c_index')
+    ax2.set_xlabel('epoch'); ax2.set_ylabel('c-index'); ax2.set_title('C-index')
+    ax2.legend(); ax2.grid(alpha=0.3)
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150)
+    plt.close(fig)
+    print("Courbes sauvegardees dans {}".format(out_path))
+
+
 class EarlyStopping:
     """Early stops the training if validation loss doesn't improve after a given patience."""
     def __init__(self, warmup=5, patience=15, stop_epoch=20, verbose=False):
@@ -120,18 +149,19 @@ def train(datasets: tuple, cur: int, args: Namespace):
         writer = None
 
     print('\nInit train/val/test splits...', end=' ')
-    train_split, val_split = datasets
-    save_splits(datasets, ['train', 'val'], os.path.join(args.results_dir, 'splits_{}.csv'.format(cur)))
+    train_split, val_split, test_split = datasets
+    save_splits(datasets, ['train', 'val', 'test'], os.path.join(args.results_dir, 'splits_{}.csv'.format(cur)))
     print('Done!')
 
     # Distribution de survie du train set : sert de reference (censoring KM) a
-    # concordance_index_ipcw, aussi bien pour le c-index train que val.
+    # concordance_index_ipcw, aussi bien pour le c-index train, val que test.
     train_survival = to_structured_survival(
         train_split.slide_data['censorship'].values,
         train_split.slide_data[train_split.label_col].values,
     )
     print("Training on {} samples".format(len(train_split)))
     print("Validating on {} samples".format(len(val_split)))
+    print("Testing on {} samples".format(len(test_split)))
 
     print('\nInit loss function...', end=' ')
     if args.task_type == 'survival':
@@ -180,9 +210,10 @@ def train(datasets: tuple, cur: int, args: Namespace):
     print('Done!')
     
     print('\nInit Loaders...', end=' ')
-    train_loader = get_split_loader(train_split, training=True, testing = args.testing, 
+    train_loader = get_split_loader(train_split, training=True, testing = args.testing,
                                     weighted = args.weighted_sample, mode=args.mode, batch_size=args.batch_size)
     val_loader = get_split_loader(val_split,  testing = args.testing, mode=args.mode, batch_size=args.batch_size)
+    test_loader = get_split_loader(test_split,  testing = args.testing, mode=args.mode, batch_size=args.batch_size)
     print('Done!')
 
     print('\nSetup EarlyStopping...', end=' ')
@@ -221,13 +252,20 @@ def train(datasets: tuple, cur: int, args: Namespace):
             break
 
     pd.DataFrame(loss_history).to_csv(os.path.join(args.results_dir, 'loss_curve_{}.csv'.format(cur)), index=False)
+    save_loss_curves(loss_history, os.path.join(args.results_dir, 'loss_curve_{}.png'.format(cur)))
 
     torch.save(model.state_dict(), os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur)))
     model.load_state_dict(torch.load(os.path.join(args.results_dir, "s_{}_checkpoint.pt".format(cur))))
-    results_val_dict, val_cindex = summary_survival(model, val_loader, args.n_classes, train_survival=train_survival)
-    print('Val c-Index: {:.4f}'.format(val_cindex))
+    results_test_dict, test_cindex = summary_survival(model, test_loader, args.n_classes, train_survival=train_survival)
+    _, val_cindex = summary_survival(model, val_loader, args.n_classes, train_survival=train_survival)
+    print('Val c-Index: {:.4f}, Test c-Index: {:.4f}'.format(val_cindex, test_cindex))
+
+    with open(os.path.join(args.results_dir, 'test_cindex_{}.txt'.format(cur)), 'w') as f:
+        f.write('val_cindex: {:.6f}\n'.format(val_cindex))
+        f.write('test_cindex: {:.6f}\n'.format(test_cindex))
+
     writer.close()
-    return results_val_dict, val_cindex
+    return results_test_dict, val_cindex, test_cindex
 
 
 def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None, loss_fn=None, reg_fn=None, lambda_reg=0., gc=16, train_survival=None):
