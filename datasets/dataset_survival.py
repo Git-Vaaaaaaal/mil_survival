@@ -192,15 +192,16 @@ class Generic_WSI_Survival_Dataset(Dataset):
         return split
 
 
-    def return_splits(self, from_id: bool=True, csv_path: str=None):
+    def return_splits(self, from_id: bool=True, csv_path: str=None, splits_df=None):
         if from_id:
             raise NotImplementedError
         else:
-            assert csv_path
-            all_splits = pd.read_csv(csv_path)
-            train_split = self.get_split_from_df(all_splits=all_splits, split_key='train')
-            val_split = self.get_split_from_df(all_splits=all_splits, split_key='val')
-            test_split = self.get_split_from_df(all_splits=all_splits, split_key='test') if 'test' in all_splits.columns else None
+            if splits_df is None:
+                assert csv_path
+                splits_df = pd.read_csv(csv_path)
+            train_split = self.get_split_from_df(all_splits=splits_df, split_key='train')
+            val_split = self.get_split_from_df(all_splits=splits_df, split_key='val')
+            test_split = self.get_split_from_df(all_splits=splits_df, split_key='test') if 'test' in splits_df.columns else None
 
         return train_split, val_split, test_split
 

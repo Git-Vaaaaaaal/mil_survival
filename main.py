@@ -33,8 +33,7 @@ data_root      = os.path.join(BASE_DIR, 'data_224_reborn')  # racine des donnée
 label_csv_name = os.path.join(BASE_DIR, 'csv', 'multi_label_patient_id.csv')
 
 results_dir   = os.path.join(BASE_DIR, 'results')   # dossier de sauvegarde des résultats
-splits_root   = os.path.join(BASE_DIR, 'splits')     # racine des ./splits/{which_splits}/{marker}
-which_splits  = 'holdout'                            # sous-dossier dans splits_root
+which_splits  = 'holdout'                            # étiquette de nommage (results / exp_code)
 global_summary_path = os.path.join(results_dir, 'summary_all.csv')  # agrège summary_latest.csv de tous les runs
 
 # --- Reproductibilité ---------------------------------------------------------
@@ -96,6 +95,10 @@ ENCODER_CFG = {
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# CSV brut des labels (patient_id, old_patient_id, stain, status, PFS, OS, ...),
+# lu une seule fois et réutilisé pour le nettoyage et le calcul des splits.
+label_df = pd.read_csv(label_csv_name)
+
 def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_time'
     df = df[df['stain'] == marker].copy()
     df['case_id'] = df['patient_id']
@@ -107,50 +110,58 @@ def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_ti
     return df
 
 
-def generate_splits_for_marker(df, marker, out_dir, train_frac, val_frac, seed):
-    """Split unique train/val/test sur old_patient_id (patient réel) pour éviter
-    qu'un même patient (parfois présent sous plusieurs patient_id/slide_id) se
-    retrouve dans plusieurs partitions."""
-    marker_df = df[df['stain'] == marker]
-    patients = marker_df['old_patient_id'].unique().copy()
-    os.makedirs(out_dir, exist_ok=True)
-
-    rng = np.random.RandomState(seed)
+def _three_way_split(patients, train_frac, val_frac, rng):
+    """Répartit une liste de patients en (train, val, test). Garantit au moins un
+    patient dans val et test dès que le groupe compte au moins 3 patients."""
+    patients = list(patients)
     rng.shuffle(patients)
-
     n = len(patients)
     n_train = int(round(n * train_frac))
     n_val = int(round(n * val_frac))
+    if n >= 3:
+        n_train = min(n_train, n - 2)          # laisse >=1 pour val et test
+        n_val = max(1, min(n_val, n - n_train - 1))
+    return patients[:n_train], patients[n_train:n_train + n_val], patients[n_train + n_val:]
 
-    train_patients = set(patients[:n_train])
-    val_patients = set(patients[n_train:n_train + n_val])
-    test_patients = set(patients[n_train + n_val:])
+
+def compute_splits(df, marker, label, train_frac, val_frac, seed):
+    """Calcule EN MÉMOIRE un split train/val/test STRATIFIÉ sur le statut de
+    censure, groupé par old_patient_id (patient réel) pour éviter toute fuite.
+    La stratification utilise le statut APRÈS plafonnement à 5 ans (identique à
+    cleaning_csv) pour le label courant (PFS ou OS), afin que chaque set contienne
+    des patients censurés ET non censurés. Retourne un DataFrame avec les colonnes
+    'train'/'val'/'test' contenant les slide_id (aucun fichier écrit sur disque)."""
+    marker_df = df[df['stain'] == marker].copy()
+
+    # Événement observé (non censuré) = status == 0 ET temps <= 5 ans.
+    marker_df['event_capped'] = (marker_df['status'] == 0) & (marker_df[label] <= 5.0)
+    # Un label par patient (événement s'il a au moins une lame avec événement).
+    event_per_patient = marker_df.groupby('old_patient_id')['event_capped'].any()
+    event_patients = event_per_patient.index[event_per_patient.values].to_numpy()
+    censored_patients = event_per_patient.index[~event_per_patient.values].to_numpy()
+
+    rng = np.random.RandomState(seed)
+    tr_e, va_e, te_e = _three_way_split(event_patients, train_frac, val_frac, rng)
+    tr_c, va_c, te_c = _three_way_split(censored_patients, train_frac, val_frac, rng)
+
+    train_patients = set(tr_e) | set(tr_c)
+    val_patients = set(va_e) | set(va_c)
+    test_patients = set(te_e) | set(te_c)
 
     def slides_for(patients_subset):
         return (marker_df.loc[marker_df['old_patient_id'].isin(patients_subset), 'patient_id']
-                .astype(int).astype(str).tolist())
+                .astype(int).tolist())
 
-    split_df = pd.concat([
+    splits_df = pd.concat([
         pd.Series(slides_for(train_patients), name='train'),
         pd.Series(slides_for(val_patients), name='val'),
         pd.Series(slides_for(test_patients), name='test'),
     ], axis=1)
-    split_df.to_csv(os.path.join(out_dir, 'splits_0.csv'))
 
-    print("Split généré pour {}: {} patients (train={}, val={}, test={}), {} lames -> {}".format(
-        marker, n, len(train_patients), len(val_patients), len(test_patients), len(marker_df), out_dir))
-
-
-def ensure_splits(label_csv_name, marker_list, splits_root, which_splits, train_frac, val_frac, seed):
-    df = None
-    for marker in marker_list:
-        out_dir = os.path.join(splits_root, which_splits, marker)
-        split_path = os.path.join(out_dir, 'splits_0.csv')
-        if os.path.isfile(split_path):
-            continue
-        if df is None:
-            df = pd.read_csv(label_csv_name)
-        generate_splits_for_marker(df, marker, out_dir, train_frac, val_frac, seed)
+    print("Split {} / {}: {} patients (evt={}, cens={}) -> train={}, val={}, test={} lames".format(
+        marker, label, len(event_per_patient), len(event_patients), len(censored_patients),
+        int(splits_df['train'].count()), int(splits_df['val'].count()), int(splits_df['test'].count())))
+    return splits_df
 
 
 def seed_torch(seed=7):
@@ -172,7 +183,7 @@ def build_args(encoder, marker, label):
         label_col = label,
         results_dir=results_dir,
         which_splits=which_splits,
-        split_dir=marker,
+        split_dir='{}_{}'.format(marker, label),
         seed=seed,
         k=k, k_start=k_start, k_end=k_end,
         log_data=log_data, overwrite=overwrite, testing=testing,
@@ -193,7 +204,7 @@ def load_dataset(args, marker):
     print('\nLoad Dataset')
     args.n_classes = 4
     dataset = Generic_MIL_Survival_Dataset(
-        csv_path  = cleaning_csv(pd.read_csv(label_csv_name), marker, args.label_col),
+        csv_path  = cleaning_csv(label_df, marker, args.label_col),
         mode      = args.mode,
         data_dir  = os.path.join(args.data_root_dir, 'graphs'),
         shuffle   = False,
@@ -210,47 +221,23 @@ def load_dataset(args, marker):
     return dataset
 
 
-def main(args, dataset):
+def main(args, dataset, splits_df):
     if not os.path.isdir(args.results_dir):
         os.mkdir(args.results_dir)
 
-    fold_start = 0        if args.k_start == -1 else args.k_start
-    fold_end   = args.k   if args.k_end   == -1 else args.k_end
+    t_start = timer()
+    seed_torch(args.seed)
 
-    latest_val_cindex = []
-    latest_test_cindex = []
-    processed_folds = []
-    folds = np.arange(fold_start, fold_end)
+    # Split unique train/val/test calculé en mémoire (aucun fichier splits_*.csv).
+    train_dataset, val_dataset, test_dataset = dataset.return_splits(from_id=False, splits_df=splits_df)
+    print('training: {}, validation: {}, test: {}'.format(len(train_dataset), len(val_dataset), len(test_dataset)))
+    datasets = (train_dataset, val_dataset, test_dataset)
 
-    for i in folds:
-        t_start = timer()
-        seed_torch(args.seed)
-        results_pkl_path = os.path.join(
-            args.results_dir, 'split_latest_val_{}_results.pkl'.format(i)
-        )
-        if os.path.isfile(results_pkl_path):
-            print("Skipping Split %d" % i)
-            continue
+    test_latest, val_cindex, test_cindex = train(datasets, 0, args)
+    save_pkl(os.path.join(args.results_dir, 'split_latest_val_0_results.pkl'), test_latest)
+    print('Training Time: %f seconds' % (timer() - t_start))
 
-        train_dataset, val_dataset, test_dataset = dataset.return_splits(
-            from_id=False,
-            csv_path='{}/splits_{}.csv'.format(args.split_dir, i)
-        )
-        print('training: {}, validation: {}, test: {}'.format(len(train_dataset), len(val_dataset), len(test_dataset)))
-        datasets = (train_dataset, val_dataset, test_dataset)
-
-        if args.task_type == 'survival':
-            test_latest, val_cindex, test_cindex = train(datasets, i, args)
-            latest_val_cindex.append(val_cindex)
-            latest_test_cindex.append(test_cindex)
-            processed_folds.append(i)
-
-        save_pkl(results_pkl_path, test_latest)
-        print('Fold %d Time: %f seconds' % (i, timer() - t_start))
-
-    if args.task_type == 'survival':
-        results_latest_df = pd.DataFrame({'folds': processed_folds, 'val_cindex': latest_val_cindex, 'test_cindex': latest_test_cindex})
-
+    results_latest_df = pd.DataFrame({'val_cindex': [val_cindex], 'test_cindex': [test_cindex]})
     results_latest_df.to_csv(os.path.join(args.results_dir, 'summary_latest.csv'))
     return results_latest_df
 
@@ -313,10 +300,10 @@ def run_experiment(encoder, marker, label):
         append_to_global_summary(results_latest_df, encoder, marker, label, args)
         return
 
-    args.split_dir = os.path.join(splits_root, args.which_splits, args.split_dir)
-    print("split_dir", args.split_dir)
-    assert os.path.isdir(args.split_dir)
-    settings.update({'split_dir': args.split_dir})
+    # Split train/val/test calculé en mémoire (stratifié, groupé par patient).
+    splits_df = compute_splits(label_df, marker, label, train_frac, val_frac, args.seed)
+    settings.update({'split': 'in-memory train/val/test ({}/{}/{})'.format(
+        train_frac, val_frac, round(1 - train_frac - val_frac, 4))})
 
     with open(args.results_dir + '/experiment_{}.txt'.format(args.exp_code), 'w') as f:
         print(settings, file=f)
@@ -325,11 +312,9 @@ def run_experiment(encoder, marker, label):
     for key, val in settings.items():
         print("{}:  {}".format(key, val))
 
-    results_latest_df = main(args, dataset)
+    results_latest_df = main(args, dataset, splits_df)
     append_to_global_summary(results_latest_df, encoder, marker, label, args)
 
-
-ensure_splits(label_csv_name, marker_list, splits_root, which_splits, train_frac, val_frac, seed)
 
 for label in label_list:
     for encoder in list_encoder:

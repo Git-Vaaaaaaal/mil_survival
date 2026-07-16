@@ -25,6 +25,24 @@ def to_structured_survival(censorships, event_times):
     return np.array(list(zip(event_indicator, event_times)), dtype=[('event', bool), ('time', float)])
 
 
+def compute_cindex_ipcw(train_survival, censorships, event_times, risk_scores):
+    """Calcule le c-index IPCW de maniere robuste. Renvoie nan si le c-index n'est
+    pas calculable : aucun evenement observe (train ou set evalue), temps hors
+    plage de la distribution de censure d'entrainement, etc."""
+    survival_test = to_structured_survival(censorships, event_times)
+    if not train_survival['event'].any() or not survival_test['event'].any():
+        print("Attention: aucun evenement observe (train ou set evalue), c-index = nan.")
+        return float('nan')
+    # tau : plus grand temps d'evenement observe dans le train, pour eviter
+    # l'erreur "time must be smaller than largest observed time point".
+    tau = train_survival['time'][train_survival['event']].max()
+    try:
+        return concordance_index_ipcw(train_survival, survival_test, risk_scores, tau=tau, tied_tol=1e-08)[0]
+    except ValueError as e:
+        print("Attention: c-index IPCW non calculable ({}), c-index = nan.".format(e))
+        return float('nan')
+
+
 def save_loss_curves(loss_history, out_path):
     """Trace les courbes train/val (loss et c-index) et enregistre un PNG."""
     try:
@@ -321,8 +339,7 @@ def train_loop_survival(epoch, model, loader, optimizer, n_classes, writer=None,
     train_loss /= len(loader)
 
     # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
-    survival_test = to_structured_survival(all_censorships, all_event_times)
-    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = compute_cindex_ipcw(train_survival, all_censorships, all_event_times, all_risk_scores)
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
 
@@ -373,8 +390,7 @@ def validate_survival(cur, epoch, model, loader, n_classes, early_stopping=None,
 
     val_loss_surv /= len(loader)
     val_loss /= len(loader)
-    survival_test = to_structured_survival(all_censorships, all_event_times)
-    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = compute_cindex_ipcw(train_survival, all_censorships, all_event_times, all_risk_scores)
 
     if writer:
         writer.add_scalar('val/loss_surv', val_loss_surv, epoch)
@@ -426,8 +442,7 @@ def summary_survival(model, loader, n_classes, train_survival=None):
         all_event_times[batch_idx] = event_time
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'risk': risk, 'disc_label': label.item(), 'survival': event_time, 'censorship': c}})
 
-    survival_test = to_structured_survival(all_censorships, all_event_times)
-    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = compute_cindex_ipcw(train_survival, all_censorships, all_event_times, all_risk_scores)
     return patient_results, c_index
 
 
@@ -479,8 +494,7 @@ def train_loop_survival_cluster(epoch, model, loader, optimizer, n_classes, writ
     train_loss /= len(loader)
 
     # c_index = concordance_index(all_event_times, all_risk_scores, event_observed=1-all_censorships)
-    survival_test = to_structured_survival(all_censorships, all_event_times)
-    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = compute_cindex_ipcw(train_survival, all_censorships, all_event_times, all_risk_scores)
 
     print('Epoch: {}, train_loss_surv: {:.4f}, train_loss: {:.4f}, train_c_index: {:.4f}'.format(epoch, train_loss_surv, train_loss, c_index))
 
@@ -526,8 +540,7 @@ def validate_survival_cluster(cur, epoch, model, loader, n_classes, early_stoppi
 
     val_loss_surv /= len(loader)
     val_loss /= len(loader)
-    survival_test = to_structured_survival(all_censorships, all_event_times)
-    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = compute_cindex_ipcw(train_survival, all_censorships, all_event_times, all_risk_scores)
 
     if writer:
         writer.add_scalar('val/loss_surv', val_loss_surv, epoch)
@@ -574,6 +587,5 @@ def summary_survival_cluster(model, loader, n_classes, train_survival=None):
         all_event_times[batch_idx] = event_time
         patient_results.update({slide_id: {'slide_id': np.array(slide_id), 'risk': risk, 'disc_label': label.item(), 'survival': event_time, 'censorship': c}})
 
-    survival_test = to_structured_survival(all_censorships, all_event_times)
-    c_index = concordance_index_ipcw(train_survival, survival_test, all_risk_scores, tied_tol=1e-08)[0]
+    c_index = compute_cindex_ipcw(train_survival, all_censorships, all_event_times, all_risk_scores)
     return patient_results, c_index
