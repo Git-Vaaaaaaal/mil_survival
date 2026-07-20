@@ -102,10 +102,16 @@ label_df = pd.read_csv(label_csv_name)
 def cleaning_csv(df, marker, element_time): #element_time = 'PFS_time' or 'OS_time'
     df = df[df['stain'] == marker].copy()
     df['case_id'] = df['patient_id']
+    # Convention brute : status 1 = évènement observé, 0 = censuré.
+    # Convention attendue par le dataset : censorship 0 = évènement, 1 = censuré.
+    # => on inverse.
+    df['censorship'] = 1 - df['status']
+    # Plafonnement administratif à 5 ans : l'évènement (s'il existe) survient
+    # après la fenêtre de suivi -> patient censuré à 5 ans.
     mask = df[element_time] > 5.0
-    df.loc[mask, "status"] = 0
+    df.loc[mask, 'censorship'] = 1
     df.loc[mask, element_time] = 5.0
-    df = df.rename(columns={"status": "censorship", "patient_id": "slide_id"})
+    df = df.rename(columns={"patient_id": "slide_id"})
     df = df[['case_id', 'slide_id', 'censorship', element_time]]
     return df
 
@@ -133,8 +139,8 @@ def compute_splits(df, marker, label, train_frac, val_frac, seed):
     'train'/'val'/'test' contenant les slide_id (aucun fichier écrit sur disque)."""
     marker_df = df[df['stain'] == marker].copy()
 
-    # Événement observé (non censuré) = status == 0 ET temps <= 5 ans.
-    marker_df['event_capped'] = (marker_df['status'] == 0) & (marker_df[label] <= 5.0)
+    # Événement observé (non censuré) = status == 1 (convention brute) ET temps <= 5 ans.
+    marker_df['event_capped'] = (marker_df['status'] == 1) & (marker_df[label] <= 5.0)
     # Un label par patient (événement s'il a au moins une lame avec événement).
     event_per_patient = marker_df.groupby('old_patient_id')['event_capped'].any()
     event_patients = event_per_patient.index[event_per_patient.values].to_numpy()
